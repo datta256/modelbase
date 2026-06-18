@@ -9,17 +9,15 @@ services:
   - type: web
     name: modelbase
     runtime: node
-    plan: starter  # $7/month — upgrade to standard ($25) for 100k+ visits
-    buildCommand: cd web && npm install && npm run build
+    plan: free
+    buildCommand: cd web && npm install && npm run prebuild && npm run build
     startCommand: cd web && npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_SITE_URL
-        value: https://modelbase.onrender.com  # Change after custom domain
+        value: https://modelbase.onrender.com
       - key: DATABASE_PATH
         value: ./db/objaverse.db
-    disk:
-      name: objaverse-db
-      mountPath: /opt/render/project/src/web/db
-      sizeGB: 5  # 1GB DB + room to grow
+      - key: DB_DOWNLOAD_URL
+        value: ""  # Set after uploading DB to GitHub Release
