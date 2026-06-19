@@ -1,6 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+
+interface DownloadData {
+  downloadUrl: string;
+  filename: string;
+  viewerUrl?: string;
+}
 
 interface DownloadButtonProps {
   uid: string;
@@ -11,46 +17,73 @@ interface DownloadButtonProps {
 export default function DownloadButton({ uid, name, downloadable }: DownloadButtonProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const downloadData = useRef<DownloadData | null>(null);
+  const prefetching = useRef(false);
 
-  const handleDownload = async () => {
-    if (!downloadable) return;
-    
-    setIsDownloading(true);
-    setError(null);
-    
+  const fetchDownloadData = async (): Promise<DownloadData | null> => {
+    if (downloadData.current) return downloadData.current;
+    if (prefetching.current) return null;
+    prefetching.current = true;
+
     try {
-      // Call our API to get the correct download URL
       const response = await fetch(`/api/download?uid=${encodeURIComponent(uid)}`);
       const data = await response.json();
-      
+
       if (!response.ok) {
         if (data.viewerUrl) {
-          // Model exists but isn't downloadable - redirect to viewer
-          window.open(data.viewerUrl, '_blank');
-          setIsDownloading(false);
-          return;
+          return { downloadUrl: data.viewerUrl, filename: '', viewerUrl: data.viewerUrl };
         }
         throw new Error(data.error || 'Failed to get download URL');
       }
-      
-      // Create a temporary anchor element to trigger download
-      const link = document.createElement('a');
-      link.href = data.downloadUrl;
-      link.download = data.filename;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      
-      // Append to body, click, and remove
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
+
+      downloadData.current = {
+        downloadUrl: data.downloadUrl,
+        filename: data.filename,
+      };
+      return downloadData.current;
+    } finally {
+      prefetching.current = false;
+    }
+  };
+
+  const triggerDownload = (data: DownloadData) => {
+    if (data.viewerUrl) {
+      window.open(data.viewerUrl, '_blank');
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = data.downloadUrl;
+    link.download = data.filename;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownload = async () => {
+    if (!downloadable) return;
+
+    setIsDownloading(true);
+    setError(null);
+
+    try {
+      const data = await fetchDownloadData();
+      if (!data) return;
+      triggerDownload(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start download. Please try again.');
       console.error('Download error:', err);
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const handleMouseEnter = () => {
+    if (!downloadable || downloadData.current || prefetching.current) return;
+    fetchDownloadData().catch(console.error);
   };
 
   if (!downloadable) {
@@ -72,6 +105,7 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
     <div className="flex flex-col gap-2">
       <button
         onClick={handleDownload}
+        onMouseEnter={handleMouseEnter}
         disabled={isDownloading}
         className="px-6 py-3.5 bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 disabled:from-green-800 disabled:to-emerald-700 text-white font-semibold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/40 hover:scale-105 disabled:hover:scale-100 disabled:shadow-none"
       >

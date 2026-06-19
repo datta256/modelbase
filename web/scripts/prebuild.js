@@ -6,54 +6,26 @@ const path = require('path');
 const https = require('https');
 
 const destDir = path.join(__dirname, '..', 'db');
-const destPath = path.join(destDir, 'objaverse.db');
-
-// 1. Check if DB already exists (e.g., on Render persistent disk)
-if (fs.existsSync(destPath)) {
-  const mb = (fs.statSync(destPath).size / 1024 / 1024).toFixed(1);
-  console.log(`DB already exists: ${mb}MB`);
-  process.exit(0);
-}
-
-// 2. Try to copy from local source (local dev build)
-const sourcePaths = [
-  path.join(__dirname, '..', '..', 'backend', 'objaverse.db'),
-  path.join(__dirname, '..', 'backend', 'objaverse.db'),
-];
-
-for (const sourcePath of sourcePaths) {
-  if (fs.existsSync(sourcePath)) {
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-    console.log(`Copying local DB: ${sourcePath}`);
-    fs.copyFileSync(sourcePath, destPath);
-    console.log('Done.');
-    process.exit(0);
-  }
-}
-
-// 3. Download from GitHub Release (production deployment)
-const downloadUrl = process.env.DB_DOWNLOAD_URL;
-
-if (!downloadUrl) {
-  console.error('ERROR: DB not found locally and DB_DOWNLOAD_URL not set.');
-  console.error('Options:');
-  console.error('  1. Set DB_DOWNLOAD_URL env var (GitHub release URL)');
-  console.error('  2. Or mount a persistent disk with the DB at:', destPath);
-  process.exit(1);
-}
+const dbPath = path.join(destDir, 'objaverse.db');
+const objectPathsUrl = 'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
+const objectPathsPath = path.join(destDir, 'object-paths.json.gz');
 
 function downloadFile(url, dest) {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
     const file = fs.createWriteStream(dest);
-    
-    https.get(url, { followRedirect: true }, (response) => {
+    const timeout = setTimeout(() => {
+      file.destroy();
+      reject(new Error('Download timeout'));
+    }, 300000); // 5 minutes
+
+    https.get(url, { followRedirect: true, timeout: 300000 }, (response) => {
       if (response.statusCode === 301 || response.statusCode === 302) {
         // Follow redirect
         downloadFile(response.headers.location, dest).then(resolve).catch(reject);
         return;
       }
-      
+
       if (response.statusCode !== 200) {
         reject(new Error(`Download failed: ${response.statusCode}`));
         return;
@@ -61,7 +33,7 @@ function downloadFile(url, dest) {
 
       const total = parseInt(response.headers['content-length'], 10);
       let downloaded = 0;
-      
+
       response.on('data', (chunk) => {
         downloaded += chunk.length;
         if (total && downloaded % (10 * 1024 * 1024) === 0) {
@@ -72,22 +44,71 @@ function downloadFile(url, dest) {
 
       response.pipe(file);
       file.on('finish', () => {
+        clearTimeout(timeout);
         file.close();
         const mb = (fs.statSync(dest).size / 1024 / 1024).toFixed(1);
         console.log(`Downloaded: ${mb}MB`);
         resolve();
       });
-    }).on('error', reject);
+    }).on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
 }
 
-console.log('Downloading DB from GitHub Release...');
-downloadFile(downloadUrl, destPath)
-  .then(() => {
-    console.log('Done.');
-    process.exit(0);
-  })
+async function main() {
+  // 1. Database
+  if (fs.existsSync(dbPath)) {
+    const mb = (fs.statSync(dbPath).size / 1024 / 1024).toFixed(1);
+    console.log(`DB already exists: ${mb}MB`);
+  } else {
+    // Try to copy from local source (local dev build)
+    const sourcePaths = [
+      path.join(__dirname, '..', '..', 'backend', 'objaverse.db'),
+      path.join(__dirname, '..', 'backend', 'objaverse.db'),
+    ];
+
+    let copied = false;
+    for (const sourcePath of sourcePaths) {
+      if (fs.existsSync(sourcePath)) {
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        console.log(`Copying local DB: ${sourcePath}`);
+        fs.copyFileSync(sourcePath, dbPath);
+        copied = true;
+        break;
+      }
+    }
+
+    if (!copied) {
+      const downloadUrl = process.env.DB_DOWNLOAD_URL;
+      if (!downloadUrl) {
+        console.error('ERROR: DB not found locally and DB_DOWNLOAD_URL not set.');
+        console.error('Options:');
+        console.error('  1. Set DB_DOWNLOAD_URL env var (GitHub release URL)');
+        console.error('  2. Or mount a persistent disk with the DB at:', dbPath);
+        process.exit(1);
+      }
+      console.log('Downloading DB from GitHub Release...');
+      await downloadFile(downloadUrl, dbPath);
+    }
+  }
+
+  // 2. Object paths mapping
+  if (fs.existsSync(objectPathsPath)) {
+    const mb = (fs.statSync(objectPathsPath).size / 1024 / 1024).toFixed(1);
+    console.log(`Object paths already exist: ${mb}MB`);
+  } else {
+    console.log('Downloading object paths from Hugging Face...');
+    await downloadFile(objectPathsUrl, objectPathsPath);
+  }
+
+  console.log('Done.');
+}
+
+main()
+  .then(() => process.exit(0))
   .catch((err) => {
-    console.error('Download failed:', err.message);
+    console.error('Prebuild failed:', err.message);
     process.exit(1);
   });

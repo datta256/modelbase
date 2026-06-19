@@ -1,35 +1,91 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, assets } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import zlib from 'node:zlib';
+import fs from 'node:fs';
+import path from 'node:path';
+import https from 'node:https';
 
 // Cache for object paths mapping
 let objectPathsCache: Map<string, string> | null = null;
 
+const OBJECT_PATHS_URL = 'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
+const OBJECT_PATHS_CACHE_FILE = path.join(process.cwd(), 'db', 'object-paths.json.gz');
+
+function loadObjectPathsFromDisk(): Map<string, string> | null {
+  if (!fs.existsSync(OBJECT_PATHS_CACHE_FILE)) return null;
+  try {
+    const compressed = fs.readFileSync(OBJECT_PATHS_CACHE_FILE);
+    const decompressed = zlib.gunzipSync(compressed);
+    const objectPaths = JSON.parse(decompressed.toString('utf-8')) as Record<string, string>;
+    return new Map(Object.entries(objectPaths));
+  } catch (error) {
+    console.error('Error loading object paths from disk:', error);
+    return null;
+  }
+}
+
+function downloadFile(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const dir = path.dirname(dest);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const file = fs.createWriteStream(dest);
+    const timeout = setTimeout(() => {
+      file.destroy();
+      reject(new Error('Download timeout'));
+    }, 300000); // 5 minutes
+
+    https.get(url, { timeout: 300000 }, (response) => {
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        if (response.headers.location) {
+          downloadFile(response.headers.location, dest).then(resolve).catch(reject);
+          return;
+        }
+      }
+
+      if (response.statusCode !== 200) {
+        reject(new Error(`Download failed: ${response.statusCode}`));
+        return;
+      }
+
+      response.pipe(file);
+      file.on('finish', () => {
+        clearTimeout(timeout);
+        file.close();
+        resolve();
+      });
+    }).on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
 async function getObjectPaths(): Promise<Map<string, string>> {
   if (objectPathsCache) return objectPathsCache;
-  
-  try {
-    // Fetch the object-paths.json.gz from Hugging Face
-    const response = await fetch(
-      'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz',
-      { next: { revalidate: 86400 } } // Cache for 24 hours
-    );
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch object paths');
-    }
-    
-    // Decompress and parse
-    const decompressed = await response.arrayBuffer();
-    // For now, we'll use a simple heuristic based on known patterns
-    // The actual implementation would decompress gzip and parse JSON
-    
-    objectPathsCache = new Map();
+
+  // Try loading from local disk cache first
+  const diskCache = loadObjectPathsFromDisk();
+  if (diskCache) {
+    objectPathsCache = diskCache;
     return objectPathsCache;
-  } catch (error) {
-    console.error('Error loading object paths:', error);
-    return new Map();
   }
+
+  try {
+    console.log('Downloading object paths from Hugging Face...');
+    await downloadFile(OBJECT_PATHS_URL, OBJECT_PATHS_CACHE_FILE);
+    console.log('Object paths saved to', OBJECT_PATHS_CACHE_FILE);
+
+    const downloadedCache = loadObjectPathsFromDisk();
+    if (downloadedCache) {
+      objectPathsCache = downloadedCache;
+      return objectPathsCache;
+    }
+  } catch (error) {
+    console.error('Error downloading object paths:', error);
+  }
+
+  return new Map();
 }
 
 // Heuristic to determine file path based on UID
@@ -80,11 +136,12 @@ export async function GET(request: NextRequest) {
     }
     
     // Try to get the actual path from cache or calculate it
-    // const objectPaths = await getObjectPaths();
-    // const path = objectPaths.get(uid) || getObjectPath(uid);
+    const objectPaths = await getObjectPaths();
+    const exactPath = objectPaths.get(uid);
+    const heuristicPath = getObjectPath(uid);
     
-    // For now, use the direct Hugging Face URL with the heuristic path
-    const path = getObjectPath(uid);
+    // Build the direct Hugging Face URL with the exact path if available, otherwise heuristic
+    const path = exactPath || heuristicPath;
     const downloadUrl = `https://huggingface.co/datasets/allenai/objaverse/resolve/main/${path}`;
     
     // Verify the URL exists by making a HEAD request
