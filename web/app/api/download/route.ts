@@ -12,15 +12,37 @@ let objectPathsCache: Map<string, string> | null = null;
 const OBJECT_PATHS_URL =
   process.env.OBJECT_PATHS_DOWNLOAD_URL ||
   'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
-const OBJECT_PATHS_CACHE_FILE = path.join(process.cwd(), 'db', 'object-paths.json.gz');
+
+const OBJECT_PATHS_CANDIDATES = [
+  path.join(process.cwd(), 'db', 'object-paths.json.gz'),
+  path.join(process.cwd(), 'web', 'db', 'object-paths.json.gz'),
+  path.join(process.cwd(), '..', 'db', 'object-paths.json.gz'),
+  path.join(process.cwd(), '..', '..', 'db', 'object-paths.json.gz'),
+].filter(Boolean);
+
+function findObjectPathsFile(): string | null {
+  for (const candidate of OBJECT_PATHS_CANDIDATES) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 function loadObjectPathsFromDisk(): Map<string, string> | null {
-  if (!fs.existsSync(OBJECT_PATHS_CACHE_FILE)) return null;
+  const filePath = findObjectPathsFile();
+  if (!filePath) {
+    console.log('Object paths file not found. Searched:', OBJECT_PATHS_CANDIDATES);
+    return null;
+  }
   try {
-    const compressed = fs.readFileSync(OBJECT_PATHS_CACHE_FILE);
+    console.log('Loading object paths from', filePath);
+    const compressed = fs.readFileSync(filePath);
     const decompressed = zlib.gunzipSync(compressed);
     const objectPaths = JSON.parse(decompressed.toString('utf-8')) as Record<string, string>;
-    return new Map(Object.entries(objectPaths));
+    const map = new Map(Object.entries(objectPaths));
+    console.log(`Loaded ${map.size} object paths`);
+    return map;
   } catch (error) {
     console.error('Error loading object paths from disk:', error);
     return null;
@@ -73,10 +95,17 @@ async function getObjectPaths(): Promise<Map<string, string>> {
     return objectPathsCache;
   }
 
+  // Don't try to download during a request in production; fallback to heuristic
+  if (process.env.NODE_ENV === 'production') {
+    console.log('Object paths not available in production; using heuristic fallback');
+    return new Map();
+  }
+
   try {
-    console.log('Downloading object paths from Hugging Face...');
-    await downloadFile(OBJECT_PATHS_URL, OBJECT_PATHS_CACHE_FILE);
-    console.log('Object paths saved to', OBJECT_PATHS_CACHE_FILE);
+    const cacheFile = OBJECT_PATHS_CANDIDATES[0];
+    console.log('Downloading object paths from', OBJECT_PATHS_URL);
+    await downloadFile(OBJECT_PATHS_URL, cacheFile);
+    console.log('Object paths saved to', cacheFile);
 
     const downloadedCache = loadObjectPathsFromDisk();
     if (downloadedCache) {
@@ -88,6 +117,20 @@ async function getObjectPaths(): Promise<Map<string, string>> {
   }
 
   return new Map();
+}
+
+// Lightweight HEAD check with a short timeout
+async function verifyUrl(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeout);
+    return response.ok;
+  } catch (error) {
+    console.log('HEAD check failed for', url, error);
+    return false;
+  }
 }
 
 // Heuristic to determine file path based on UID
@@ -146,10 +189,10 @@ export async function GET(request: NextRequest) {
     const path = exactPath || heuristicPath;
     const downloadUrl = `https://huggingface.co/datasets/allenai/objaverse/resolve/main/${path}`;
     
-    // Verify the URL exists by making a HEAD request
-    const headResponse = await fetch(downloadUrl, { method: 'HEAD' });
+    // Verify the URL exists by making a HEAD request (with a short timeout)
+    const isVerified = await verifyUrl(downloadUrl);
     
-    if (!headResponse.ok) {
+    if (!isVerified) {
       // Try alternative path patterns
       const alternativePaths = [
         `glbs/000-000/${uid}.glb`,
@@ -168,8 +211,7 @@ export async function GET(request: NextRequest) {
       
       for (const altPath of alternativePaths) {
         const altUrl = `https://huggingface.co/datasets/allenai/objaverse/resolve/main/${altPath}`;
-        const altHead = await fetch(altUrl, { method: 'HEAD' });
-        if (altHead.ok) {
+        if (await verifyUrl(altUrl)) {
           return NextResponse.json({
             uid: asset[0].uid,
             name: asset[0].name,
