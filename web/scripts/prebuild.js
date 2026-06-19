@@ -7,7 +7,9 @@ const https = require('https');
 
 const destDir = path.join(__dirname, '..', 'db');
 const dbPath = path.join(destDir, 'objaverse.db');
-const objectPathsUrl = 'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
+const objectPathsUrl =
+  process.env.OBJECT_PATHS_DOWNLOAD_URL ||
+  'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
 const objectPathsPath = path.join(destDir, 'object-paths.json.gz');
 
 function downloadFile(url, dest) {

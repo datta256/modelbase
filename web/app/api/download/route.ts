@@ -9,7 +9,9 @@ import https from 'node:https';
 // Cache for object paths mapping
 let objectPathsCache: Map<string, string> | null = null;
 
-const OBJECT_PATHS_URL = 'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
+const OBJECT_PATHS_URL =
+  process.env.OBJECT_PATHS_DOWNLOAD_URL ||
+  'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
 const OBJECT_PATHS_CACHE_FILE = path.join(process.cwd(), 'db', 'object-paths.json.gz');
 
 function loadObjectPathsFromDisk(): Map<string, string> | null {
