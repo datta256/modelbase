@@ -4,24 +4,27 @@ import { eq } from 'drizzle-orm';
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
-import https from 'node:https';
+import Database from 'better-sqlite3';
 
-// Cache for object paths mapping
+// Cache for object paths mapping (JSON fallback only)
 let objectPathsCache: Map<string, string> | null = null;
 
-const OBJECT_PATHS_URL =
-  process.env.OBJECT_PATHS_DOWNLOAD_URL ||
-  'https://huggingface.co/datasets/allenai/objaverse/resolve/main/object-paths.json.gz';
+const OBJECT_PATHS_DB_CANDIDATES = [
+  path.join(process.cwd(), 'db', 'object-paths.db'),
+  path.join(process.cwd(), 'web', 'db', 'object-paths.db'),
+  path.join(process.cwd(), '..', 'db', 'object-paths.db'),
+  path.join(process.cwd(), '..', '..', 'db', 'object-paths.db'),
+].filter(Boolean);
 
-const OBJECT_PATHS_CANDIDATES = [
+const OBJECT_PATHS_JSON_CANDIDATES = [
   path.join(process.cwd(), 'db', 'object-paths.json.gz'),
   path.join(process.cwd(), 'web', 'db', 'object-paths.json.gz'),
   path.join(process.cwd(), '..', 'db', 'object-paths.json.gz'),
   path.join(process.cwd(), '..', '..', 'db', 'object-paths.json.gz'),
 ].filter(Boolean);
 
-function findObjectPathsFile(): string | null {
-  for (const candidate of OBJECT_PATHS_CANDIDATES) {
+function findFirstExisting(candidates: string[]): string | null {
+  for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       return candidate;
     }
@@ -29,10 +32,10 @@ function findObjectPathsFile(): string | null {
   return null;
 }
 
-function loadObjectPathsFromDisk(): Map<string, string> | null {
-  const filePath = findObjectPathsFile();
+function loadObjectPathsFromJson(): Map<string, string> | null {
+  const filePath = findFirstExisting(OBJECT_PATHS_JSON_CANDIDATES);
   if (!filePath) {
-    console.log('Object paths file not found. Searched:', OBJECT_PATHS_CANDIDATES);
+    console.log('Object paths JSON not found. Searched:', OBJECT_PATHS_JSON_CANDIDATES);
     return null;
   }
   try {
@@ -41,82 +44,38 @@ function loadObjectPathsFromDisk(): Map<string, string> | null {
     const decompressed = zlib.gunzipSync(compressed);
     const objectPaths = JSON.parse(decompressed.toString('utf-8')) as Record<string, string>;
     const map = new Map(Object.entries(objectPaths));
-    console.log(`Loaded ${map.size} object paths`);
+    console.log(`Loaded ${map.size} object paths into memory`);
     return map;
   } catch (error) {
-    console.error('Error loading object paths from disk:', error);
+    console.error('Error loading object paths from JSON:', error);
     return null;
   }
 }
 
-function downloadFile(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const dir = path.dirname(dest);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const file = fs.createWriteStream(dest);
-    const timeout = setTimeout(() => {
-      file.destroy();
-      reject(new Error('Download timeout'));
-    }, 300000); // 5 minutes
-
-    https.get(url, { timeout: 300000 }, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        if (response.headers.location) {
-          downloadFile(response.headers.location, dest).then(resolve).catch(reject);
-          return;
-        }
-      }
-
-      if (response.statusCode !== 200) {
-        reject(new Error(`Download failed: ${response.statusCode}`));
-        return;
-      }
-
-      response.pipe(file);
-      file.on('finish', () => {
-        clearTimeout(timeout);
-        file.close();
-        resolve();
-      });
-    }).on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
+function getObjectPathFromDb(uid: string): string | null {
+  const filePath = findFirstExisting(OBJECT_PATHS_DB_CANDIDATES);
+  if (!filePath) return null;
+  try {
+    const objectPathsDb = new Database(filePath, { readonly: true, fileMustExist: true });
+    const row = objectPathsDb.prepare('SELECT path FROM object_paths WHERE uid = ?').get(uid) as { path: string } | undefined;
+    objectPathsDb.close();
+    return row?.path || null;
+  } catch (error) {
+    console.error('Error querying object paths DB:', error);
+    return null;
+  }
 }
 
-async function getObjectPaths(): Promise<Map<string, string>> {
-  if (objectPathsCache) return objectPathsCache;
+async function getObjectPath(uid: string): Promise<string | null> {
+  // Prefer SQLite DB (memory efficient)
+  const dbPath = getObjectPathFromDb(uid);
+  if (dbPath) return dbPath;
 
-  // Try loading from local disk cache first
-  const diskCache = loadObjectPathsFromDisk();
-  if (diskCache) {
-    objectPathsCache = diskCache;
-    return objectPathsCache;
+  // Fall back to in-memory JSON Map
+  if (!objectPathsCache) {
+    objectPathsCache = loadObjectPathsFromJson();
   }
-
-  // Don't try to download during a request in production; fallback to heuristic
-  if (process.env.NODE_ENV === 'production') {
-    console.log('Object paths not available in production; using heuristic fallback');
-    return new Map();
-  }
-
-  try {
-    const cacheFile = OBJECT_PATHS_CANDIDATES[0];
-    console.log('Downloading object paths from', OBJECT_PATHS_URL);
-    await downloadFile(OBJECT_PATHS_URL, cacheFile);
-    console.log('Object paths saved to', cacheFile);
-
-    const downloadedCache = loadObjectPathsFromDisk();
-    if (downloadedCache) {
-      objectPathsCache = downloadedCache;
-      return objectPathsCache;
-    }
-  } catch (error) {
-    console.error('Error downloading object paths:', error);
-  }
-
-  return new Map();
+  return objectPathsCache?.get(uid) || null;
 }
 
 // Lightweight HEAD check with a short timeout
@@ -135,7 +94,7 @@ async function verifyUrl(url: string): Promise<boolean> {
 
 // Heuristic to determine file path based on UID
 // Files are organized in glbs/XXX-XXX/ subdirectories
-function getObjectPath(uid: string): string {
+function getHeuristicObjectPath(uid: string): string {
   // Remove .glb extension if present
   const cleanUid = uid.endsWith('.glb') ? uid.slice(0, -4) : uid;
   
@@ -181,9 +140,8 @@ export async function GET(request: NextRequest) {
     }
     
     // Try to get the actual path from cache or calculate it
-    const objectPaths = await getObjectPaths();
-    const exactPath = objectPaths.get(uid);
-    const heuristicPath = getObjectPath(uid);
+    const exactPath = await getObjectPath(uid);
+    const heuristicPath = getHeuristicObjectPath(uid);
     
     // Build the direct Hugging Face URL with the exact path if available, otherwise heuristic
     const path = exactPath || heuristicPath;

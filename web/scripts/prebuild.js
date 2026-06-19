@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { execSync } = require('child_process');
 
 const destDir = path.join(__dirname, '..', 'db');
 const dbPath = path.join(destDir, 'objaverse.db');
@@ -97,12 +98,37 @@ async function main() {
   }
 
   // 2. Object paths mapping
-  if (fs.existsSync(objectPathsPath)) {
-    const mb = (fs.statSync(objectPathsPath).size / 1024 / 1024).toFixed(1);
-    console.log(`Object paths already exist: ${mb}MB`);
+  const objectPathsDbPath = path.join(destDir, 'object-paths.db');
+  const objectPathsJsonPath = path.join(destDir, 'object-paths.json.gz');
+  const isDbUrl = objectPathsUrl.endsWith('.db');
+  const isJsonUrl = objectPathsUrl.endsWith('.json.gz');
+
+  if (fs.existsSync(objectPathsDbPath)) {
+    const mb = (fs.statSync(objectPathsDbPath).size / 1024 / 1024).toFixed(1);
+    console.log(`Object paths DB already exists: ${mb}MB`);
+  } else if (isDbUrl) {
+    console.log('Downloading object paths DB...');
+    await downloadFile(objectPathsUrl, objectPathsDbPath);
   } else {
-    console.log('Downloading object paths from Hugging Face...');
-    await downloadFile(objectPathsUrl, objectPathsPath);
+    // Download .json.gz (or fallback) and convert to .db
+    if (!fs.existsSync(objectPathsJsonPath)) {
+      console.log('Downloading object paths JSON...');
+      await downloadFile(objectPathsUrl, objectPathsJsonPath);
+    } else {
+      const mb = (fs.statSync(objectPathsJsonPath).size / 1024 / 1024).toFixed(1);
+      console.log(`Object paths JSON already exists: ${mb}MB`);
+    }
+
+    console.log('Converting object paths JSON to SQLite DB...');
+    try {
+      execSync(
+        `node "${path.join(__dirname, 'build-object-paths-db.js')}" "${objectPathsJsonPath}" "${objectPathsDbPath}"`,
+        { stdio: 'inherit' }
+      );
+    } catch (err) {
+      console.error('Failed to convert object paths to SQLite DB. The API may run out of memory when loading JSON.', err);
+      // Don't exit — the API can still fall back to JSON if needed
+    }
   }
 
   console.log('Done.');

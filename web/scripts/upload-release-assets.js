@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { execSync } = require('child_process');
 
 const token = process.env.GITHUB_TOKEN;
 if (!token) {
@@ -27,7 +28,7 @@ if (!match) {
 const [owner, repo] = [match[1], match[2]];
 
 const assetsDir = path.join(__dirname, '..', 'db');
-const files = ['objaverse.db', 'object-paths.json.gz'];
+const files = ['objaverse.db', 'object-paths.json.gz', 'object-paths.db'];
 
 function apiRequest(method, hostname, path, headers = {}, body = null) {
   return new Promise((resolve, reject) => {
@@ -114,6 +115,18 @@ async function uploadAsset(releaseId, filepath) {
 async function main() {
   console.log(`Uploading assets to release ${tag}...`);
   const releaseId = await getReleaseId();
+
+  // Generate the SQLite object-paths DB if needed
+  const dbPath = path.join(assetsDir, 'object-paths.db');
+  if (!fs.existsSync(dbPath)) {
+    const jsonPath = path.join(assetsDir, 'object-paths.json.gz');
+    if (fs.existsSync(jsonPath)) {
+      console.log('Generating object-paths.db from object-paths.json.gz...');
+      execSync(`node "${path.join(__dirname, 'build-object-paths-db.js')}" "${jsonPath}" "${dbPath}"`, {
+        stdio: 'inherit',
+      });
+    }
+  }
 
   for (const filename of files) {
     const filepath = path.join(assetsDir, filename);
