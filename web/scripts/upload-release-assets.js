@@ -89,27 +89,69 @@ async function deleteExistingAsset(releaseId, filename) {
   }
 }
 
+function uploadStream(releaseId, filepath) {
+  const filename = path.basename(filepath);
+  const size = fs.statSync(filepath).size;
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      method: 'POST',
+      hostname: 'uploads.github.com',
+      path: `/repos/${owner}/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(filename)}`,
+      headers: {
+        Authorization: `token ${token}`,
+        'User-Agent': 'modelbase-upload-script',
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': size,
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          const parsed = JSON.parse(data);
+          resolve(parsed.browser_download_url);
+        } else {
+          reject(new Error(`Upload failed: ${res.statusCode} ${data}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+
+    const readStream = fs.createReadStream(filepath);
+    let uploaded = 0;
+    let lastPct = -1;
+
+    readStream.on('data', (chunk) => {
+      uploaded += chunk.length;
+      const pct = Math.floor((uploaded / size) * 100);
+      if (pct !== lastPct && pct % 10 === 0) {
+        console.log(`Uploading ${filename}... ${pct}%`);
+        lastPct = pct;
+      }
+    });
+
+    readStream.pipe(req);
+
+    readStream.on('error', reject);
+    readStream.on('end', () => {
+      console.log(`Uploading ${filename}... 100%`);
+    });
+  });
+}
+
 async function uploadAsset(releaseId, filepath) {
   const filename = path.basename(filepath);
   const size = fs.statSync(filepath).size;
-  const body = fs.readFileSync(filepath);
 
   await deleteExistingAsset(releaseId, filename);
 
   console.log(`Uploading ${filename} (${(size / 1024 / 1024).toFixed(1)}MB)...`);
-
-  const result = await apiRequest(
-    'POST',
-    'uploads.github.com',
-    `/repos/${owner}/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(filename)}`,
-    {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': size,
-    },
-    body
-  );
-
-  console.log(`Uploaded: ${result.data.browser_download_url}`);
+  const url = await uploadStream(releaseId, filepath);
+  console.log(`Uploaded: ${url}`);
 }
 
 async function main() {
