@@ -177,7 +177,7 @@ async function getRelatedModels(uid: string, name: string, category: string | nu
           AND ${assets.thumbnail} != ''
           AND ${assets.thumbnail} NOT LIKE '%Not found%'`
       )
-      .orderBy(sql`RANDOM()`)
+      .orderBy(sql`rowid`)
       .limit(6);
     return results;
   }
@@ -200,7 +200,6 @@ async function getRelatedModels(uid: string, name: string, category: string | nu
       AND assets.thumbnail IS NOT NULL
       AND assets.thumbnail != ''
       AND assets.thumbnail NOT LIKE '%Not found%'
-    ORDER BY RANDOM()
     LIMIT 8
   `);
 
