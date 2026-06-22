@@ -1,53 +1,64 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 
 export default function NavigationLoader() {
-  const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [visible, setVisible] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // When route changes complete, finish the bar
   useEffect(() => {
-    setLoading(false);
     setProgress(100);
-    const t = setTimeout(() => setProgress(0), 400);
+    const t = setTimeout(() => {
+      setVisible(false);
+      setProgress(0);
+    }, 400);
     return () => clearTimeout(t);
   }, [pathname, searchParams]);
 
-  const startLoading = useCallback(() => {
-    setLoading(true);
-    setProgress(20);
-    const t1 = setTimeout(() => setProgress(50), 200);
-    const t2 = setTimeout(() => setProgress(75), 600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, []);
-
+  // Intercept all internal link clicks and router navigations
   useEffect(() => {
-    const anchors = document.querySelectorAll('a[href]');
-    const handleClick = (e: Event) => {
-      const a = e.currentTarget as HTMLAnchorElement;
-      const href = a.getAttribute('href');
-      if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto')) return;
-      startLoading();
+    let timers: ReturnType<typeof setTimeout>[] = [];
+
+    const start = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+      setVisible(true);
+      setProgress(15);
+      timers.push(setTimeout(() => setProgress(40), 200));
+      timers.push(setTimeout(() => setProgress(65), 600));
+      timers.push(setTimeout(() => setProgress(80), 1200));
     };
 
-    anchors.forEach(a => a.addEventListener('click', handleClick));
-    return () => anchors.forEach(a => a.removeEventListener('click', handleClick));
-  }, [pathname, startLoading]);
+    const handleClick = (e: MouseEvent) => {
+      const target = (e.target as Element).closest('a[href]') as HTMLAnchorElement | null;
+      if (!target) return;
+      const href = target.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto') || href.startsWith('tel')) return;
+      start();
+    };
 
-  if (!loading && progress === 0) return null;
+    document.addEventListener('click', handleClick, true);
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      timers.forEach(clearTimeout);
+    };
+  }, []);
+
+  if (!visible && progress === 0) return null;
 
   return (
     <div
-      className="fixed top-0 left-0 z-[9999] h-[3px] bg-blue-500 transition-all duration-300 ease-out"
+      className="fixed top-0 left-0 z-[9999] h-[3px] bg-blue-500 pointer-events-none"
       style={{
         width: `${progress}%`,
-        opacity: progress === 100 ? 0 : 1,
-        transition: progress === 100
-          ? 'width 0.1s ease-out, opacity 0.4s ease-out 0.1s'
-          : 'width 0.4s ease-out',
+        opacity: progress >= 100 ? 0 : 1,
+        transition: progress >= 100
+          ? 'width 0.15s ease-out, opacity 0.35s ease-out 0.1s'
+          : 'width 0.5s ease-out',
       }}
     />
   );
