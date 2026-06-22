@@ -15,7 +15,8 @@ import {
 } from '@/lib/categories';
 import { SITE_URL } from '@/lib/site-config';
 
-export const revalidate = 86400;
+export const revalidate = 3600;
+export const dynamicParams = true;
 
 interface PageProps {
   params: Promise<{ slug: string[] }>;
@@ -78,28 +79,38 @@ function buildCategoryFilter(slug: string) {
   ];
   
   // If we have a search pattern, search across category, tags, name, description
+  // Multiple terms (from | separator) are joined with OR — any term matching is sufficient
   if (pattern) {
     const searchTerms = pattern.split('|');
     
-    for (const term of searchTerms) {
+    const termConditions = searchTerms.map(term => {
       const t = '%' + term.toLowerCase() + '%';
-      baseConditions.push(
-        sql`(
-          LOWER(${assets.category}) LIKE ${t} OR
-          LOWER(${assets.tags}) LIKE ${t} OR
-          LOWER(${assets.name}) LIKE ${t} OR
-          LOWER(${assets.description}) LIKE ${t}
-        )`
-      );
-    }
+      return sql`(
+        LOWER(${assets.category}) LIKE ${t} OR
+        LOWER(${assets.tags}) LIKE ${t} OR
+        LOWER(${assets.name}) LIKE ${t} OR
+        LOWER(${assets.description}) LIKE ${t}
+      )`;
+    });
+    
+    baseConditions.push(or(...termConditions));
   }
   
   return and(...baseConditions);
 }
 
+function slugSeed(slug: string): number {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) {
+    h = Math.imul(31, h) + slug.charCodeAt(i) | 0;
+  }
+  return Math.abs(h) % 1000000;
+}
+
 async function getCategoryModels(slug: string, page: number = 1) {
   const offset = (page - 1) * CATEGORY_PAGE_SIZE;
   const whereClause = buildCategoryFilter(slug);
+  const seed = slugSeed(slug);
 
   const results = await db
     .select({
@@ -115,6 +126,7 @@ async function getCategoryModels(slug: string, page: number = 1) {
     })
     .from(assets)
     .where(whereClause)
+    .orderBy(sql`(CAST(SUBSTR(uid, 1, 8) AS INTEGER) + ${seed}) % 1000000`)
     .limit(CATEGORY_PAGE_SIZE)
     .offset(offset);
 

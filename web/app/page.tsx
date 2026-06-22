@@ -131,24 +131,31 @@ async function getPopularCategories(limit = 6) {
 
 async function getCategoryThumbnails(categories: string[]) {
   const thumbnails: Record<string, string[]> = {};
+  if (categories.length === 0) return thumbnails;
 
-  for (const category of categories) {
-    const results = await db
-      .select({ thumbnail: assets.thumbnail })
-      .from(assets)
-      .where(
-        and(
-          eq(assets.category, category),
-          sql`${assets.thumbnail} != ''`,
-          isNotNull(assets.thumbnail)
+  // Batch: one query per category using UNION ALL equivalent via Promise.all with LIMIT 4 each
+  const results = await Promise.all(
+    categories.map(category =>
+      db
+        .select({ category: assets.category, thumbnail: assets.thumbnail })
+        .from(assets)
+        .where(
+          and(
+            eq(assets.category, category),
+            sql`${assets.thumbnail} != ''`,
+            isNotNull(assets.thumbnail)
+          )
         )
-      )
-      .orderBy(desc(assets.face_count))
-      .limit(12);
+        .limit(4)
+    )
+  );
 
-    thumbnails[category] = results
-      .map(r => r.thumbnail)
-      .filter((t): t is string => t !== null && t !== '');
+  for (const rows of results) {
+    for (const row of rows) {
+      if (!row.category || !row.thumbnail) continue;
+      if (!thumbnails[row.category]) thumbnails[row.category] = [];
+      thumbnails[row.category].push(row.thumbnail);
+    }
   }
 
   return thumbnails;
@@ -183,6 +190,8 @@ function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 }
+
+export const revalidate = 3600;
 
 export default async function Home() {
   const popularCategoriesRaw = await getPopularCategories(8);
