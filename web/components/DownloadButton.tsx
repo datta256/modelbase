@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 
 interface DownloadData {
   downloadUrl: string;
@@ -15,53 +15,48 @@ interface DownloadButtonProps {
 }
 
 export default function DownloadButton({ uid, name, downloadable }: DownloadButtonProps) {
+  const [isFetching, setIsFetching] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const downloadData = useRef<DownloadData | null>(null);
-  const inflightRef = useRef<Promise<DownloadData | null> | null>(null);
 
-  const fetchDownloadData = (): Promise<DownloadData | null> => {
-    if (downloadData.current) return Promise.resolve(downloadData.current);
-    if (inflightRef.current) return inflightRef.current;
+  const fetchDownloadData = async (): Promise<DownloadData | null> => {
+    if (downloadData.current) return downloadData.current;
 
-    const promise = (async () => {
-      try {
-        const response = await fetch(`/api/download?uid=${encodeURIComponent(uid)}`);
-        const data = await response.json();
+    const response = await fetch(`/api/download?uid=${encodeURIComponent(uid)}`);
+    const data = await response.json();
 
-        if (!response.ok) {
-          if (data.viewerUrl) {
-            return { downloadUrl: data.viewerUrl, filename: '', viewerUrl: data.viewerUrl };
-          }
-          throw new Error(data.error || 'Failed to get download URL');
-        }
-
-        downloadData.current = {
-          downloadUrl: data.downloadUrl,
-          filename: data.filename,
-        };
+    if (!response.ok) {
+      if (data.viewerUrl) {
+        downloadData.current = { downloadUrl: data.viewerUrl, filename: '', viewerUrl: data.viewerUrl };
         return downloadData.current;
-      } finally {
-        inflightRef.current = null;
       }
-    })();
+      throw new Error(data.error || 'Failed to get download URL');
+    }
 
-    inflightRef.current = promise;
-    return promise;
+    downloadData.current = { downloadUrl: data.downloadUrl, filename: data.filename };
+    return downloadData.current;
   };
+
+  // Pre-fetch on mount so the link is ready before user clicks
+  useEffect(() => {
+    if (!downloadable) return;
+    setIsFetching(true);
+    fetchDownloadData()
+      .catch(console.error)
+      .finally(() => setIsFetching(false));
+  }, [uid, downloadable]);
 
   const triggerDownload = (data: DownloadData) => {
     if (data.viewerUrl) {
       window.open(data.viewerUrl, '_blank');
       return;
     }
-
     const link = document.createElement('a');
     link.href = data.downloadUrl;
     link.download = data.filename;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -69,10 +64,8 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
 
   const handleDownload = async () => {
     if (!downloadable) return;
-
     setIsDownloading(true);
     setError(null);
-
     try {
       const data = await fetchDownloadData();
       if (!data) return;
@@ -83,11 +76,6 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
     } finally {
       setIsDownloading(false);
     }
-  };
-
-  const handleMouseEnter = () => {
-    if (!downloadable || downloadData.current || inflightRef.current) return;
-    fetchDownloadData().catch(console.error);
   };
 
   if (!downloadable) {
@@ -105,21 +93,30 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
     );
   }
 
+  const busy = isFetching || isDownloading;
+
   return (
     <div className="flex flex-col gap-2">
       <button
         onClick={handleDownload}
-        onMouseEnter={handleMouseEnter}
-        disabled={isDownloading}
+        disabled={busy}
         className="px-6 py-3.5 bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 disabled:from-green-800 disabled:to-emerald-700 text-white font-semibold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/40 hover:scale-105 disabled:hover:scale-100 disabled:shadow-none"
       >
-        {isDownloading ? (
+        {isFetching ? (
           <>
             <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            Downloading...
+            Fetching...
+          </>
+        ) : isDownloading ? (
+          <>
+            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Starting...
           </>
         ) : (
           <>
@@ -130,7 +127,7 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
           </>
         )}
       </button>
-      
+
       {error && (
         <p className="text-red-400 text-sm bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">{error}</p>
       )}
