@@ -41,7 +41,8 @@ async function getAllTags(): Promise<TagData[]> {
         isNotNull(assets.thumbnail),
         notLike(assets.thumbnail, '%Not found%')
       )
-    );
+    )
+    .limit(50000);
 
   const tagCounts: Record<string, number> = {};
 
@@ -160,4 +161,4 @@ export default async function TagsPage() {
   );
 }
 
-export const revalidate = 86400;
+export const dynamic = 'force-dynamic';

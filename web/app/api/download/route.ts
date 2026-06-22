@@ -139,58 +139,38 @@ export async function GET(request: NextRequest) {
       }, { status: 403 });
     }
     
-    // Try to get the actual path from cache or calculate it
+    // Try to get the actual path from the DB/cache
     const exactPath = await getObjectPath(uid);
-    const heuristicPath = getHeuristicObjectPath(uid);
-    
-    // Build the direct Hugging Face URL with the exact path if available, otherwise heuristic
-    const path = exactPath || heuristicPath;
-    const downloadUrl = `https://huggingface.co/datasets/allenai/objaverse/resolve/main/${path}`;
-    
-    // Verify the URL exists by making a HEAD request (with a short timeout)
-    const isVerified = await verifyUrl(downloadUrl);
-    
-    if (!isVerified) {
-      // Try alternative path patterns
-      const alternativePaths = [
-        `glbs/000-000/${uid}.glb`,
-        `glbs/000-001/${uid}.glb`,
-        `glbs/000-002/${uid}.glb`,
-        `glbs/000-003/${uid}.glb`,
-        `glbs/000-004/${uid}.glb`,
-        `glbs/000-005/${uid}.glb`,
-        `glbs/000-006/${uid}.glb`,
-        `glbs/000-007/${uid}.glb`,
-        `glbs/000-008/${uid}.glb`,
-        `glbs/000-009/${uid}.glb`,
-        `glbs/000-010/${uid}.glb`,
-        `glbs/000-011/${uid}.glb`,
-      ];
-      
-      for (const altPath of alternativePaths) {
-        const altUrl = `https://huggingface.co/datasets/allenai/objaverse/resolve/main/${altPath}`;
-        if (await verifyUrl(altUrl)) {
-          return NextResponse.json({
-            uid: asset[0].uid,
-            name: asset[0].name,
-            downloadUrl: altUrl,
-            filename: `${asset[0].name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${uid}.glb`,
-          });
-        }
-      }
-      
-      return NextResponse.json({ 
-        error: 'Model file not found in Objaverse repository',
-        attemptedPath: downloadUrl
-      }, { status: 404 });
+    const filename = `${asset[0].name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${uid}.glb`;
+    const HF_BASE = 'https://huggingface.co/datasets/allenai/objaverse/resolve/main';
+
+    if (exactPath) {
+      // Exact path from DB — trust it, no HEAD check needed
+      return NextResponse.json({
+        uid: asset[0].uid,
+        name: asset[0].name,
+        downloadUrl: `${HF_BASE}/${exactPath}`,
+        filename,
+      });
     }
-    
+
+    // No exact path — fall back to heuristic and verify with HEAD
+    const heuristicPath = getHeuristicObjectPath(uid);
+    const heuristicUrl = `${HF_BASE}/${heuristicPath}`;
+
+    if (await verifyUrl(heuristicUrl)) {
+      return NextResponse.json({
+        uid: asset[0].uid,
+        name: asset[0].name,
+        downloadUrl: heuristicUrl,
+        filename,
+      });
+    }
+
     return NextResponse.json({
-      uid: asset[0].uid,
-      name: asset[0].name,
-      downloadUrl: downloadUrl,
-      filename: `${asset[0].name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${uid}.glb`,
-    });
+      error: 'Model file not found in Objaverse repository',
+      attemptedPath: heuristicUrl,
+    }, { status: 404 });
     
   } catch (error) {
     console.error('Download API error:', error);
