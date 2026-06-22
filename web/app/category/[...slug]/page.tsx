@@ -73,26 +73,18 @@ function buildCategoryFilter(slug: string) {
   
   // Base conditions: has thumbnail
   const baseConditions: any[] = [
-    sql`thumbnail != ''`,
+    sql`${assets.thumbnail} != ''`,
     isNotNull(assets.thumbnail),
     notLike(assets.thumbnail, '%Not found%'),
   ];
   
-  // If we have a search pattern, search across category, tags, name, description
-  // Multiple terms (from | separator) are joined with OR — any term matching is sufficient
+  // Match strictly on the category column only to avoid unrelated results
   if (pattern) {
     const searchTerms = pattern.split('|');
-    
     const termConditions = searchTerms.map(term => {
       const t = '%' + term.toLowerCase() + '%';
-      return sql`(
-        LOWER(${assets.category}) LIKE ${t} OR
-        LOWER(${assets.tags}) LIKE ${t} OR
-        LOWER(${assets.name}) LIKE ${t} OR
-        LOWER(${assets.description}) LIKE ${t}
-      )`;
+      return sql`LOWER(${assets.category}) LIKE ${t}`;
     });
-    
     baseConditions.push(or(...termConditions));
   }
   
