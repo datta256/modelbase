@@ -18,32 +18,36 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const downloadData = useRef<DownloadData | null>(null);
-  const prefetching = useRef(false);
+  const inflightRef = useRef<Promise<DownloadData | null> | null>(null);
 
-  const fetchDownloadData = async (): Promise<DownloadData | null> => {
-    if (downloadData.current) return downloadData.current;
-    if (prefetching.current) return null;
-    prefetching.current = true;
+  const fetchDownloadData = (): Promise<DownloadData | null> => {
+    if (downloadData.current) return Promise.resolve(downloadData.current);
+    if (inflightRef.current) return inflightRef.current;
 
-    try {
-      const response = await fetch(`/api/download?uid=${encodeURIComponent(uid)}`);
-      const data = await response.json();
+    const promise = (async () => {
+      try {
+        const response = await fetch(`/api/download?uid=${encodeURIComponent(uid)}`);
+        const data = await response.json();
 
-      if (!response.ok) {
-        if (data.viewerUrl) {
-          return { downloadUrl: data.viewerUrl, filename: '', viewerUrl: data.viewerUrl };
+        if (!response.ok) {
+          if (data.viewerUrl) {
+            return { downloadUrl: data.viewerUrl, filename: '', viewerUrl: data.viewerUrl };
+          }
+          throw new Error(data.error || 'Failed to get download URL');
         }
-        throw new Error(data.error || 'Failed to get download URL');
-      }
 
-      downloadData.current = {
-        downloadUrl: data.downloadUrl,
-        filename: data.filename,
-      };
-      return downloadData.current;
-    } finally {
-      prefetching.current = false;
-    }
+        downloadData.current = {
+          downloadUrl: data.downloadUrl,
+          filename: data.filename,
+        };
+        return downloadData.current;
+      } finally {
+        inflightRef.current = null;
+      }
+    })();
+
+    inflightRef.current = promise;
+    return promise;
   };
 
   const triggerDownload = (data: DownloadData) => {
@@ -82,7 +86,7 @@ export default function DownloadButton({ uid, name, downloadable }: DownloadButt
   };
 
   const handleMouseEnter = () => {
-    if (!downloadable || downloadData.current || prefetching.current) return;
+    if (!downloadable || downloadData.current || inflightRef.current) return;
     fetchDownloadData().catch(console.error);
   };
 
