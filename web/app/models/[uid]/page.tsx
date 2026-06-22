@@ -134,6 +134,7 @@ async function getAsset(uid: string) {
 }
 
 async function getRelatedModels(uid: string, name: string, category: string | null, tags: string | null) {
+  const uidSeed = parseInt(uid.replace(/-/g, '').slice(0, 8), 16) % 100000;
   // Build unique search terms for this specific model
   const searchTerms: string[] = [];
 
@@ -177,7 +178,7 @@ async function getRelatedModels(uid: string, name: string, category: string | nu
           AND ${assets.thumbnail} != ''
           AND ${assets.thumbnail} NOT LIKE '%Not found%'`
       )
-      .orderBy(sql`rowid`)
+      .orderBy(sql`abs(cast(substr(${assets.uid},1,8) as integer) - ${uidSeed}) % 100000`)
       .limit(6);
     return results;
   }
@@ -200,6 +201,7 @@ async function getRelatedModels(uid: string, name: string, category: string | nu
       AND assets.thumbnail IS NOT NULL
       AND assets.thumbnail != ''
       AND assets.thumbnail NOT LIKE '%Not found%'
+    ORDER BY abs(cast(substr(assets.uid,1,8) as integer) - ${uidSeed}) % 100000
     LIMIT 8
   `);
 
