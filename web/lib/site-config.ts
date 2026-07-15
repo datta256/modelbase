@@ -4,7 +4,7 @@
  */
 
 // Domain - change this when you deploy
-const DOMAIN = process.env.NEXT_PUBLIC_SITE_URL || 'https://modelbase.io';
+const DOMAIN = process.env.NEXT_PUBLIC_SITE_URL || 'https://modelbase.fun';
 
 // Ensure no trailing slash
 export const SITE_URL = DOMAIN.replace(/\/$/, '');

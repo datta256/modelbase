@@ -110,9 +110,6 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   manifest: "/site.webmanifest",
-  verification: {
-    google: "your-google-verification-code",
-  },
 };
 
 const structuredData = {
@@ -157,22 +154,6 @@ const structuredData = {
         "https://twitter.com/modelbase"
       ]
     },
-    {
-      "@type": "SoftwareApplication",
-      "name": "ModelBase",
-      "applicationCategory": "GraphicsApplication",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.9",
-        "ratingCount": "10000"
-      },
-      "featureList": "No login required, Instant download, All formats supported (GLB, OBJ, GLTF), Commercial use allowed, 10000+ free models"
-    }
   ]
 };
 

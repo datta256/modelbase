@@ -1,7 +1,7 @@
 import { MetadataRoute } from 'next';
 import { db, assets } from '@/lib/db';
 import { sql, desc } from 'drizzle-orm';
-import { ALL_CATEGORY_SLUGS } from '@/lib/categories';
+import { BASE_CATEGORIES } from '@/lib/categories';
 import { SITE_URL } from '@/lib/site-config';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -37,19 +37,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'weekly' as const,
       priority: 0.7,
     },
-    {
-      url: `${SITE_URL}/search/`,
-      lastModified: new Date(),
-      changeFrequency: 'always' as const,
-      priority: 0.5,
-    },
   ];
 
-  // Use pre-computed category slugs from shared module (2,410 entries)
-  const generatedCategoryRoutes = ALL_CATEGORY_SLUGS.map(cat => ({
-    url: `${SITE_URL}/category/${cat}/`,
+  // Only expose canonical base category URLs; modifier combinations duplicate these results.
+  const categoryRoutes = BASE_CATEGORIES.map(category => ({
+    url: `${SITE_URL}/category/${category}/`,
     lastModified: new Date(),
-    changeFrequency: 'daily' as const,
+    changeFrequency: 'weekly' as const,
     priority: 0.8,
   }));
 
@@ -69,22 +63,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.6,
     }));
 
-  // Get recent models (limit to 1000 most recent)
-  const recentModels = await db
+  // Include every model with a usable thumbnail. The current catalogue remains below the 50,000 URL sitemap limit.
+  const models = await db
     .select({
       uid: assets.uid,
     })
     .from(assets)
     .where(sql`${assets.thumbnail} != ''`)
-    .orderBy(desc(sql`rowid`))
-    .limit(1000);
+    .orderBy(desc(sql`rowid`));
 
-  const modelRoutes = recentModels.map(m => ({
+  const modelRoutes = models.map(m => ({
     url: `${SITE_URL}/models/${m.uid}/`,
     lastModified: new Date(),
     changeFrequency: 'weekly' as const,
     priority: 0.7,
   }));
 
-  return [...staticRoutes, ...generatedCategoryRoutes, ...authorRoutes, ...modelRoutes];
+  return [...staticRoutes, ...categoryRoutes, ...authorRoutes, ...modelRoutes];
 }

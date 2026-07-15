@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AssetCard from '@/components/AssetCard';
 import {
   ALL_CATEGORY_SLUGS,
+  BASE_CATEGORIES,
   getCategoryInfo,
   getCategorySearchPattern,
   getBaseCategory,
@@ -24,11 +25,7 @@ interface PageProps {
 }
 
 export async function generateStaticParams() {
-  // Generate all 2,410+ category pages
-  // The broader search (category + tags + name + description) will find results for most
-  console.log(`Generating ${ALL_CATEGORY_SLUGS.length} category pages`);
-
-  return ALL_CATEGORY_SLUGS.map(slug => ({
+  return BASE_CATEGORIES.map(slug => ({
     slug: [slug]
   }));
 }
@@ -39,6 +36,8 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const currentPage = parseInt(page, 10);
   const categorySlug = slug.join('/');
   const info = getCategoryInfo(categorySlug);
+  const baseCategory = getBaseCategory(categorySlug);
+  const isCanonicalCategory = categorySlug === baseCategory;
   
   // Generate description from slug parts for unique meta per page
   const uniqueDesc = `Download free ${info.title.toLowerCase()} 3D models. ${info.parts.slice(0, 2).join(', ')} assets for Blender, Unity, Unreal Engine. GLB, OBJ, FBX formats. Instant download, no registration.`;
@@ -48,7 +47,7 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
     description: uniqueDesc,
     keywords: generateKeywords(info),
     alternates: {
-      canonical: `${SITE_URL}/category/${categorySlug}/`,
+      canonical: `${SITE_URL}/category/${baseCategory || categorySlug}/`,
     },
     openGraph: {
       title: `${info.title} 3D Models | ModelBase`,
@@ -62,7 +61,7 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       description: uniqueDesc,
     },
     robots: {
-      index: currentPage === 1,
+      index: currentPage === 1 && isCanonicalCategory,
       follow: true,
     },
   };

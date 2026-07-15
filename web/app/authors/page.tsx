@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { Metadata } from 'next';
 import { SITE_URL } from '@/lib/site-config';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: '3D Model Authors | Browse by Creator | ModelBase',
   description: 'Discover 3D model authors and creators on ModelBase. Browse thousands of free 3D assets organized by artist.',

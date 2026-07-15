@@ -15,6 +15,8 @@ interface PageProps {
   }>;
 }
 
+export const dynamic = 'force-dynamic';
+
 const PAGE_SIZE = 12;
 
 // Generate static params for all authors (limit to top 100 for build performance)

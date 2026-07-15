@@ -53,7 +53,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       images: [asset.thumbnail || ''],
     },
     alternates: {
-      canonical: `/models/${uid}/${slugify(asset.name)}`,
+      canonical: `/models/${uid}/`,
     },
   };
 }
@@ -128,16 +128,13 @@ function slugify(name: string): string {
 
 export default async function AssetPage({ params }: PageProps) {
   const { uid, slug } = await params;
-  const asset = await getAsset(uid);
+  const asset = (await getAsset(uid))!;
 
   if (!asset) {
     notFound();
   }
 
-  const expectedSlug = slugify(asset.name);
-  if (slug !== expectedSlug) {
-    permanentRedirect(`/models/${uid}/${expectedSlug}`);
-  }
+  permanentRedirect(`/models/${uid}/`);
 
   const relatedAssets = await getRelatedAssets(asset);
 
@@ -167,7 +164,7 @@ export default async function AssetPage({ params }: PageProps) {
             {asset.category && (
               <>
                 <span className="mx-2">›</span>
-                <a href={`/category/${asset.category.toLowerCase()}`} className="hover:text-zinc-100">
+                <a href={`/category/${(asset.category ?? '').toLowerCase()}`} className="hover:text-zinc-100">
                   {asset.category}
                 </a>
               </>
@@ -185,7 +182,7 @@ export default async function AssetPage({ params }: PageProps) {
               {asset.embed_url ? (
                 <div className="aspect-video w-full mb-6 rounded-lg overflow-hidden bg-zinc-900">
                   <iframe
-                    src={asset.embed_url}
+                    src={asset.embed_url || undefined}
                     className="w-full h-full"
                     allowFullScreen
                     title={asset.name}
@@ -193,7 +190,7 @@ export default async function AssetPage({ params }: PageProps) {
                 </div>
               ) : asset.viewer_url ? (
                 <a
-                  href={asset.viewer_url}
+                  href={asset.viewer_url || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="block aspect-video w-full mb-6 rounded-lg overflow-hidden bg-zinc-900 flex items-center justify-center hover:bg-zinc-800 transition-colors"
@@ -219,7 +216,7 @@ export default async function AssetPage({ params }: PageProps) {
                 <div className="mb-6">
                   <h2 className="text-xl font-semibold mb-2">Tags</h2>
                   <div className="flex flex-wrap gap-2">
-                    {asset.tags.split(' ').map((tag, i) => (
+                    {(asset.tags ?? '').split(' ').map((tag, i) => (
                       <a
                         key={i}
                         href={`/tags/${tag.toLowerCase()}`}
@@ -240,7 +237,7 @@ export default async function AssetPage({ params }: PageProps) {
                 <div className="bg-zinc-900 rounded-lg p-4">
                   <h3 className="font-semibold mb-2">Author</h3>
                   <a
-                    href={`/authors/${asset.author.toLowerCase()}`}
+                    href={`/authors/${(asset.author ?? '').toLowerCase()}`}
                     className="text-blue-400 hover:text-blue-300"
                   >
                     {asset.author}
@@ -255,13 +252,13 @@ export default async function AssetPage({ params }: PageProps) {
                   {asset.face_count !== null && (
                     <div className="flex justify-between">
                       <dt className="text-zinc-400">Faces</dt>
-                      <dd>{asset.face_count.toLocaleString()}</dd>
+                      <dd>{(asset.face_count ?? 0).toLocaleString()}</dd>
                     </div>
                   )}
                   {asset.vertex_count !== null && (
                     <div className="flex justify-between">
                       <dt className="text-zinc-400">Vertices</dt>
-                      <dd>{asset.vertex_count.toLocaleString()}</dd>
+                      <dd>{(asset.vertex_count ?? 0).toLocaleString()}</dd>
                     </div>
                   )}
                   {asset.texture_count !== null && (
@@ -275,7 +272,7 @@ export default async function AssetPage({ params }: PageProps) {
                       <dt className="text-zinc-400">Category</dt>
                       <dd>
                         <a
-                          href={`/category/${asset.category.toLowerCase()}`}
+                          href={`/category/${(asset.category ?? '').toLowerCase()}`}
                           className="text-blue-400 hover:text-blue-300"
                         >
                           {asset.category}
@@ -293,7 +290,7 @@ export default async function AssetPage({ params }: PageProps) {
               {/* Download CTA */}
               {asset.downloadable && asset.uri && (
                 <a
-                  href={asset.uri}
+                  href={asset.uri || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="block w-full py-3 bg-blue-600 hover:bg-blue-500 text-center font-semibold rounded-lg transition-colors"
