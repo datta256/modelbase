@@ -1,10 +1,22 @@
 import { MetadataRoute } from 'next';
 import { db, assets } from '@/lib/db';
-import { sql, desc } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { BASE_CATEGORIES } from '@/lib/categories';
 import { SITE_URL } from '@/lib/site-config';
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+const MODEL_SITEMAP_PAGE_SIZE = 49_000;
+
+export async function generateSitemaps() {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(assets)
+    .where(sql`${assets.thumbnail} IS NOT NULL AND ${assets.thumbnail} != '' AND ${assets.thumbnail} NOT LIKE '%Not found%'`);
+  const pageCount = Math.max(1, Math.ceil(Number(count) / MODEL_SITEMAP_PAGE_SIZE));
+
+  return Array.from({ length: pageCount }, (_, id) => ({ id }));
+}
+
+export default async function sitemap({ id }: { id: number }): Promise<MetadataRoute.Sitemap> {
   // Static routes
   const staticRoutes = [
     {
@@ -47,30 +59,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.8,
   }));
 
-  // Get all authors
-  const authors = await db
-    .select({ author: assets.author })
-    .from(assets)
-    .where(sql`${assets.author} IS NOT NULL`)
-    .groupBy(assets.author);
-
-  const authorRoutes = authors
-    .filter(a => a.author)
-    .map(a => ({
-      url: `${SITE_URL}/authors/${encodeURIComponent(a.author!.replace(/\s+/g, '-'))}/`,
-      lastModified: new Date(),
-      changeFrequency: 'weekly' as const,
-      priority: 0.6,
-    }));
-
-  // Include every model with a usable thumbnail. The current catalogue remains below the 50,000 URL sitemap limit.
   const models = await db
     .select({
       uid: assets.uid,
     })
     .from(assets)
-    .where(sql`${assets.thumbnail} != ''`)
-    .orderBy(desc(sql`rowid`));
+    .where(sql`${assets.thumbnail} IS NOT NULL AND ${assets.thumbnail} != '' AND ${assets.thumbnail} NOT LIKE '%Not found%'`)
+    .orderBy(desc(sql`rowid`))
+    .limit(MODEL_SITEMAP_PAGE_SIZE)
+    .offset(id * MODEL_SITEMAP_PAGE_SIZE);
 
   const modelRoutes = models.map(m => ({
     url: `${SITE_URL}/models/${m.uid}/`,
@@ -79,5 +76,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }));
 
-  return [...staticRoutes, ...categoryRoutes, ...authorRoutes, ...modelRoutes];
+  return id === 0
+    ? [...staticRoutes, ...categoryRoutes, ...modelRoutes]
+    : modelRoutes;
 }
