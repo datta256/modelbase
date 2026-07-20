@@ -4,19 +4,9 @@ import { desc, sql } from 'drizzle-orm';
 import { BASE_CATEGORIES } from '@/lib/categories';
 import { SITE_URL } from '@/lib/site-config';
 
-const MODEL_SITEMAP_PAGE_SIZE = 20_000;
+const CURATED_MODEL_LIMIT = 2_000;
 
-export async function generateSitemaps() {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(assets)
-    .where(sql`${assets.thumbnail} IS NOT NULL AND ${assets.thumbnail} != '' AND ${assets.thumbnail} NOT LIKE '%Not found%'`);
-  const pageCount = Math.max(1, Math.ceil(Number(count) / MODEL_SITEMAP_PAGE_SIZE));
-
-  return Array.from({ length: pageCount }, (_, id) => ({ id }));
-}
-
-export default async function sitemap({ id }: { id: number }): Promise<MetadataRoute.Sitemap> {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Static routes
   const staticRoutes = [
     {
@@ -64,10 +54,9 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       uid: assets.uid,
     })
     .from(assets)
-    .where(sql`${assets.thumbnail} IS NOT NULL AND ${assets.thumbnail} != '' AND ${assets.thumbnail} NOT LIKE '%Not found%'`)
-    .orderBy(desc(sql`rowid`))
-    .limit(MODEL_SITEMAP_PAGE_SIZE)
-    .offset(id * MODEL_SITEMAP_PAGE_SIZE);
+    .where(sql`${assets.downloadable} = 1 AND ${assets.thumbnail} IS NOT NULL AND ${assets.thumbnail} != '' AND ${assets.thumbnail} NOT LIKE '%Not found%'`)
+    .orderBy(desc(assets.face_count), desc(sql`rowid`))
+    .limit(CURATED_MODEL_LIMIT);
 
   const modelRoutes = models.map(m => ({
     url: `${SITE_URL}/models/${m.uid}/`,
@@ -76,7 +65,5 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
     priority: 0.7,
   }));
 
-  return id === 0
-    ? [...staticRoutes, ...categoryRoutes, ...modelRoutes]
-    : modelRoutes;
+  return [...staticRoutes, ...categoryRoutes, ...modelRoutes];
 }
