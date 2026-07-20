@@ -2,7 +2,7 @@ import { assets, db } from '@/lib/db';
 import { SITE_URL } from '@/lib/site-config';
 import { sql } from 'drizzle-orm';
 
-const MODEL_SITEMAP_PAGE_SIZE = 49_000;
+const MODEL_SITEMAP_PAGE_SIZE = 20_000;
 
 export async function GET() {
   const [{ count }] = await db

@@ -4,7 +4,7 @@ import { desc, sql } from 'drizzle-orm';
 import { BASE_CATEGORIES } from '@/lib/categories';
 import { SITE_URL } from '@/lib/site-config';
 
-const MODEL_SITEMAP_PAGE_SIZE = 49_000;
+const MODEL_SITEMAP_PAGE_SIZE = 20_000;
 
 export async function generateSitemaps() {
   const [{ count }] = await db
